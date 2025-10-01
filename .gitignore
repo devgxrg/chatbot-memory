@@ -1,0 +1,33 @@
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+
+# Node / frontend
+frontend/node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Ignore environment files
+backend/.env
+
+# Python
+*.pyo
+*.pyd
+*.pkl
+*.sqlite3
+.env                # (if you ever put one at root)
+
+# Node / frontend
+frontend/.env       # (in case you use env vars in frontend)
+frontend/dist/      # build output (if you don’t want to commit built files)
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# VSCode / IDE
+.vscode/
+.idea/
+*.swp

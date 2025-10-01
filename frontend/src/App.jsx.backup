@@ -1,0 +1,717 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Send, Plus, Trash2, Edit3, MessageSquare, User, Bot, Clock, X, Check, 
+  Upload, FileText, AlertCircle, CheckCircle, Loader, Search, Menu
+} from 'lucide-react';
+
+const API_BASE = 'http://localhost:5000/api';
+
+const ChatApp = () => {
+  const [chats, setChats] = useState([]);
+  const [activeChat, setActiveChat] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [inputMessage, setInputMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [editingChatId, setEditingChatId] = useState(null);
+  const [editTitle, setEditTitle] = useState('');
+  
+  // UI states
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState(null);
+  const [showDocuments, setShowDocuments] = useState(false);
+  const [chatDocs, setChatDocs] = useState([]);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  
+  const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const dragCounter = useRef(0);
+
+  useEffect(() => {
+    loadChats();
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const loadChats = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/chats`);
+      const data = await response.json();
+      setChats(data);
+    } catch (error) {
+      console.error('Failed to load chats:', error);
+    }
+  };
+
+  const createNewChat = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/chats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const newChat = await response.json();
+      setChats(prev => [newChat, ...prev]);
+      setActiveChat(newChat.id);
+      setMessages([]);
+      setShowDocuments(false);
+    } catch (error) {
+      console.error('Failed to create chat:', error);
+    }
+  };
+
+  const loadChatDocs = async (chatId) => {
+    try {
+      const response = await fetch(`${API_BASE}/chats/${chatId}/pdfs`);
+      const data = await response.json();
+      setChatDocs(data.pdfs || []);
+    } catch (error) {
+      console.error('Failed to load chat documents:', error);
+      setChatDocs([]);
+    }
+  };
+
+  const deleteDoc = async (chatId, docName) => {
+    try {
+      const response = await fetch(`${API_BASE}/chats/${chatId}/pdfs/${encodeURIComponent(docName)}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        loadChats();
+        loadChatDocs(chatId);
+        setUploadStatus({ 
+          status: 'success', 
+          message: 'Document removed',
+          progress: 100 
+        });
+        setTimeout(() => setUploadStatus(null), 2000);
+      } else {
+        throw new Error('Failed to delete document');
+      }
+    } catch (error) {
+      setUploadStatus({ 
+        status: 'error', 
+        message: 'Failed to remove document',
+        progress: 0 
+      });
+      setTimeout(() => setUploadStatus(null), 3000);
+    }
+  };
+
+  const loadChat = async (chatId) => {
+    if (chatId === activeChat) return;
+    
+    try {
+      setActiveChat(chatId);
+      const response = await fetch(`${API_BASE}/chats/${chatId}`);
+      const data = await response.json();
+      setMessages(data);
+      setShowDocuments(false);
+      loadChatDocs(chatId);
+    } catch (error) {
+      console.error('Failed to load chat:', error);
+    }
+  };
+
+  const deleteChat = async (chatId, e) => {
+    e.stopPropagation();
+    if (!confirm('Delete this conversation?')) return;
+
+    try {
+      await fetch(`${API_BASE}/chats/${chatId}`, { method: 'DELETE' });
+      setChats(prev => prev.filter(chat => chat.id !== chatId));
+      if (chatId === activeChat) {
+        setActiveChat(null);
+        setMessages([]);
+        setShowDocuments(false);
+      }
+    } catch (error) {
+      console.error('Failed to delete chat:', error);
+    }
+  };
+
+  const renameChat = async (chatId, newTitle) => {
+    try {
+      await fetch(`${API_BASE}/chats/${chatId}/rename`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle })
+      });
+      setChats(prev => prev.map(chat => 
+        chat.id === chatId ? { ...chat, title: newTitle } : chat
+      ));
+      setEditingChatId(null);
+    } catch (error) {
+      console.error('Failed to rename chat:', error);
+    }
+  };
+
+  const handleFileUpload = async (file) => {
+    if (!activeChat) {
+      await createNewChat();
+    }
+
+    setUploadStatus({ status: 'uploading', message: 'Uploading document...', progress: 0 });
+
+    try {
+      const formData = new FormData();
+      formData.append('pdf', file);
+      
+      const response = await fetch(`${API_BASE}/chats/${activeChat}/upload-pdf`, {
+        method: 'POST',
+        body: formData
+      });
+
+      const result = await response.json();
+      
+      if (response.ok) {
+        setUploadStatus({ 
+          status: 'success', 
+          message: `Document uploaded successfully!`,
+          progress: 100 
+        });
+        
+        loadChats();
+        if (activeChat) {
+          loadChatDocs(activeChat);
+        }
+        
+        setTimeout(() => setUploadStatus(null), 3000);
+      } else {
+        throw new Error(result.error || 'Upload failed');
+      }
+    } catch (error) {
+      setUploadStatus({ 
+        status: 'error', 
+        message: `Upload failed: ${error.message}`,
+        progress: 0 
+      });
+      setTimeout(() => setUploadStatus(null), 5000);
+    }
+  };
+
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    dragCounter.current++;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDragOver(false);
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    dragCounter.current = 0;
+    
+    const files = Array.from(e.dataTransfer.files);
+    const pdfFile = files.find(file => file.type === 'application/pdf');
+    
+    if (pdfFile) {
+      handleFileUpload(pdfFile);
+    } else {
+      setUploadStatus({ 
+        status: 'error', 
+        message: 'Please upload a PDF file',
+        progress: 0 
+      });
+      setTimeout(() => setUploadStatus(null), 3000);
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!inputMessage.trim() || isLoading) return;
+    
+    let currentChatId = activeChat;
+    if (!currentChatId) {
+      await createNewChat();
+      currentChatId = activeChat;
+    }
+
+    const userMessage = {
+      id: Date.now().toString(),
+      text: inputMessage,
+      sender: 'user',
+      timestamp: new Date().toISOString()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    const currentMessage = inputMessage;
+    setInputMessage('');
+    setIsLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE}/chats/${currentChatId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: currentMessage })
+      });
+
+      if (response.ok) {
+        const botResponse = await response.json();
+        setMessages(prev => [...prev, {
+          ...botResponse,
+          hasContext: botResponse.used_pdf_context
+        }]);
+        loadChats();
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to send message');
+      }
+    } catch (error) {
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        text: `Sorry, I encountered an error. Please try again.`,
+        sender: 'bot',
+        timestamp: new Date().toISOString(),
+        isError: true
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  const formatTime = (timestamp) => {
+    return new Date(timestamp).toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
+
+  const formatDate = (timestamp) => {
+    const date = new Date(timestamp);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    } else {
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+  };
+
+  const getCurrentChat = () => chats.find(c => c.id === activeChat);
+
+  return (
+    <div className="flex h-screen bg-white">
+      {/* Drag & Drop Overlay */}
+      {isDragOver && (
+        <div className="absolute inset-0 bg-blue-500 bg-opacity-20 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="bg-white rounded-2xl p-8 shadow-2xl border-2 border-dashed border-blue-300">
+            <Upload className="w-16 h-16 text-blue-500 mx-auto mb-4" />
+            <p className="text-xl font-semibold text-center text-gray-800">Drop your document here</p>
+            <p className="text-gray-500 text-center mt-2">We'll help you chat with it</p>
+          </div>
+        </div>
+      )}
+
+      {/* Sidebar */}
+      <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-gray-50 border-r border-gray-200 flex flex-col overflow-hidden`}>
+        {/* Header */}
+        <div className="p-4 border-b border-gray-200">
+          <button
+            onClick={createNewChat}
+            className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl transition-all duration-200 font-medium shadow-sm"
+          >
+            <Plus className="w-5 h-5" />
+            New Chat
+          </button>
+        </div>
+
+        {/* Upload Status */}
+        {uploadStatus && (
+          <div className="mx-4 mt-3">
+            <div className={`p-3 rounded-xl ${
+              uploadStatus.status === 'success' ? 'bg-green-50 border border-green-200' :
+              uploadStatus.status === 'error' ? 'bg-red-50 border border-red-200' :
+              'bg-blue-50 border border-blue-200'
+            }`}>
+              <div className="flex items-center gap-2">
+                {uploadStatus.status === 'uploading' && <Loader className="w-4 h-4 animate-spin text-blue-500" />}
+                {uploadStatus.status === 'success' && <CheckCircle className="w-4 h-4 text-green-500" />}
+                {uploadStatus.status === 'error' && <AlertCircle className="w-4 h-4 text-red-500" />}
+                <span className="text-sm text-gray-700">{uploadStatus.message}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Chat List */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {chats.map((chat) => (
+            <div
+              key={chat.id}
+              onClick={() => loadChat(chat.id)}
+              className={`group p-3 rounded-xl cursor-pointer transition-all duration-200 ${
+                activeChat === chat.id
+                  ? 'bg-blue-50 border border-blue-200'
+                  : 'hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  {editingChatId === chat.id ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter') {
+                            renameChat(chat.id, editTitle);
+                          } else if (e.key === 'Escape') {
+                            setEditingChatId(null);
+                          }
+                        }}
+                        className="flex-1 bg-white border border-gray-300 rounded-lg px-2 py-1 text-sm focus:outline-none focus:border-blue-500"
+                        autoFocus
+                      />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          renameChat(chat.id, editTitle);
+                        }}
+                        className="text-green-500 hover:text-green-600"
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingChatId(null);
+                        }}
+                        className="text-gray-400 hover:text-gray-500"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-medium text-gray-800 truncate text-sm">
+                          {chat.title}
+                        </h3>
+                        {chat.has_pdf && (
+                          <div className="flex items-center gap-1 bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-xs">
+                            <FileText className="w-3 h-3" />
+                            <span>{chat.pdf_count}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-gray-500">
+                        <span>{formatDate(chat.updated_at)}</span>
+                        <span>•</span>
+                        <span>{chat.message_count} messages</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {editingChatId !== chat.id && (
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingChatId(chat.id);
+                        setEditTitle(chat.title);
+                      }}
+                      className="p-1 text-gray-400 hover:text-blue-500 rounded-lg"
+                      title="Rename"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={(e) => deleteChat(chat.id, e)}
+                      className="p-1 text-gray-400 hover:text-red-500 rounded-lg"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          
+          {chats.length === 0 && (
+            <div className="text-center py-8 text-gray-500">
+              <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p className="text-sm">No conversations yet</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main Chat Area */}
+      <div 
+        className="flex-1 flex flex-col"
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        {activeChat ? (
+          <>
+            {/* Chat Header */}
+            <div className="bg-white border-b border-gray-200 p-4">
+              <div className="flex items-center justify-between max-w-4xl mx-auto">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setSidebarOpen(!sidebarOpen)}
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors md:hidden"
+                  >
+                    <Menu className="w-5 h-5 text-gray-600" />
+                  </button>
+                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
+                    <Bot className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h1 className="font-semibold text-gray-800">
+                      {getCurrentChat()?.title || 'New Chat'}
+                    </h1>
+                    <p className="text-sm text-gray-500">
+                      AI Assistant
+                      {getCurrentChat()?.has_pdf && (
+                        <span className="ml-1">• Document loaded</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  {getCurrentChat()?.has_pdf && (
+                    <button
+                      onClick={() => setShowDocuments(!showDocuments)}
+                      className="flex items-center gap-2 px-3 py-2 text-sm bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span className="hidden sm:inline">Documents</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-2 px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span className="hidden sm:inline">Upload</span>
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf"
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      if (file) handleFileUpload(file);
+                      e.target.value = '';
+                    }}
+                    className="hidden"
+                  />
+                </div>
+              </div>
+              
+              {/* Documents Panel */}
+              {showDocuments && getCurrentChat()?.has_pdf && (
+                <div className="max-w-4xl mx-auto mt-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-medium text-gray-800 flex items-center gap-2">
+                      <FileText className="w-4 h-4" />
+                      Your Documents
+                    </h3>
+                    <button
+                      onClick={() => setShowDocuments(false)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  
+                  {chatDocs.length > 0 ? (
+                    <div className="space-y-2">
+                      {chatDocs.map((doc, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 bg-white rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <FileText className="w-5 h-5 text-blue-500" />
+                            <div>
+                              <p className="font-medium text-gray-800 text-sm">{doc.name}</p>
+                              <p className="text-xs text-gray-500">Ready for questions</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              if (confirm(`Remove "${doc.name}" from this chat?`)) {
+                                deleteDoc(activeChat, doc.name);
+                              }
+                            }}
+                            className="text-gray-400 hover:text-red-500 p-1 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-4 text-gray-500">
+                      <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No documents uploaded yet</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto bg-gray-50">
+              <div className="max-w-4xl mx-auto p-4 space-y-6">
+                {messages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`flex gap-3 ${
+                      message.sender === 'user' ? 'flex-row-reverse' : ''
+                    }`}
+                  >
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      message.sender === 'user' 
+                        ? 'bg-blue-500' 
+                        : message.hasContext
+                          ? 'bg-gradient-to-br from-purple-500 to-blue-500'
+                          : 'bg-gray-600'
+                    }`}>
+                      {message.sender === 'user' ? (
+                        <User className="w-4 h-4 text-white" />
+                      ) : (
+                        <Bot className="w-4 h-4 text-white" />
+                      )}
+                    </div>
+                    
+                    <div className={`flex-1 max-w-2xl ${
+                      message.sender === 'user' ? 'text-right' : ''
+                    }`}>
+                      <div className={`inline-block p-4 rounded-2xl ${
+                        message.sender === 'user'
+                          ? 'bg-blue-500 text-white'
+                          : message.isError
+                            ? 'bg-red-50 border border-red-200 text-red-800'
+                            : message.hasContext
+                              ? 'bg-white border-2 border-purple-200 text-gray-800'
+                              : 'bg-white border border-gray-200 text-gray-800'
+                      }`}>
+                        <div className="whitespace-pre-wrap leading-relaxed">{message.text}</div>
+                        {message.hasContext && (
+                          <div className="mt-3 pt-3 border-t border-purple-200 text-xs text-purple-600">
+                            <div className="flex items-center gap-1">
+                              <FileText className="w-3 h-3" />
+                              Answer based on your document
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className={`text-xs text-gray-500 mt-2 ${
+                        message.sender === 'user' ? 'text-right' : ''
+                      }`}>
+                        {formatTime(message.timestamp)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                
+                {isLoading && (
+                  <div className="flex gap-3">
+                    <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center">
+                      <Bot className="w-4 h-4 text-white" />
+                    </div>
+                    <div className="bg-white border border-gray-200 p-4 rounded-2xl">
+                      <div className="flex items-center gap-2">
+                        <div className="flex space-x-1">
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                        </div>
+                        <span className="text-gray-600 text-sm">Thinking...</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
+
+            {/* Message Input */}
+            <div className="bg-white border-t border-gray-200 p-4">
+              <div className="max-w-4xl mx-auto flex gap-3">
+                <div className="flex-1 relative">
+                  <textarea
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Ask me anything..."
+                    className="w-full p-4 bg-gray-50 border border-gray-300 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    rows="1"
+                    style={{ minHeight: '56px', maxHeight: '120px' }}
+                    disabled={isLoading}
+                  />
+                </div>
+                <button
+                  onClick={sendMessage}
+                  disabled={!inputMessage.trim() || isLoading}
+                  className="px-6 py-4 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-2xl transition-all duration-200 flex items-center justify-center"
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          /* Welcome Screen */
+          <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
+            <div className="text-center max-w-lg mx-auto p-8">
+              <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center mx-auto mb-8">
+                <Bot className="w-10 h-10 text-white" />
+              </div>
+              <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                Chat with AI
+              </h1>
+              <p className="text-gray-600 mb-8 text-lg leading-relaxed">
+                Start a conversation or upload a document to chat with its content. 
+                Get instant, intelligent responses to all your questions.
+              </p>
+              <button
+                onClick={createNewChat}
+                className="px-8 py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-2xl font-semibold text-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+              >
+                Start Chatting
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default ChatApp;
